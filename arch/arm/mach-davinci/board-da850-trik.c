@@ -179,7 +179,9 @@ static const short da850_trik_sd0_pins[] __initconst = {
 
 static int da850_trik_sd0_get_cd(int index)
 {
-	return !gpio_get_value(GPIO_TO_PIN(4,1));
+	// Hotfix for broken boards
+	return 1;
+//	return !gpio_get_value(GPIO_TO_PIN(4,1));
 }
 
 static struct davinci_mmc_config da850_trik_sd0_config = {
