@@ -31,9 +31,11 @@
 #include <linux/sched.h>
 #include <linux/platform_device.h>
 #include <linux/cpufreq.h>
-#include <linux/pwm/ecap_cap.h>
 #include <linux/io.h>
 #include <linux/clk.h>
+#include <linux/pwm/pwm.h>
+#include <linux/pwm/ecap_cap.h>
+#include <linux/pwm/ecap_gen.h>
 
 static const char *REQUEST_SYSFS = "sysfs";
 static LIST_HEAD(pwm_device_list);
@@ -496,7 +498,7 @@ static ssize_t pwm_run_store(struct device *dev,
 	struct pwm_device *p = dev_get_drvdata(dev);
 	int ret;
 
-	if (p->pwm_dev_capture != CAP_DISABLED) {
+	if (p->pwm_mode == PWM_CAP) {
 		return -EOPNOTSUPP;
 	}
 
@@ -527,7 +529,7 @@ static ssize_t pwm_duty_ns_show(struct device *dev,
 				char *buf)
 {
 	struct pwm_device *p = dev_get_drvdata(dev);
-	if (p->pwm_dev_capture == CAP_DISABLED) {
+	if (p->pwm_mode == PWM_GEN) {
 		return sprintf(buf, "%lu\n", pwm_get_duty_ns(p));
 	}
 	return duty_ns_show(p, buf);
@@ -540,7 +542,7 @@ static ssize_t pwm_duty_ns_store(struct device *dev,
 	unsigned long duty_ns;
 	struct pwm_device *p = dev_get_drvdata(dev);
 	int ret;
-	if (p->pwm_dev_capture != CAP_DISABLED) {
+	if (p->pwm_mode == PWM_CAP) {
 		return -EOPNOTSUPP;
 	}
 	if (!kstrtoul(buf, 10, &duty_ns)) {
@@ -560,7 +562,7 @@ static ssize_t pwm_duty_percent_show(struct device *dev,
 				char *buf)
 {
 	struct pwm_device *p = dev_get_drvdata(dev);
-	if (p->pwm_dev_capture == CAP_DISABLED) {
+	if (p->pwm_mode == PWM_GEN) {
 		return sprintf(buf, "%lu\n", pwm_get_duty_percent(p));
 	}
 	return duty_percent_show(p, buf);
@@ -575,7 +577,7 @@ static ssize_t pwm_duty_percent_store(struct device *dev,
 	struct pwm_device *p = dev_get_drvdata(dev);
 	int ret;
 
-	if (p->pwm_dev_capture != CAP_DISABLED) {
+	if (p->pwm_mode == PWM_CAP) {
 		return -EOPNOTSUPP;
 	}
 
@@ -596,7 +598,7 @@ static ssize_t pwm_period_ns_show(struct device *dev,
 				  char *buf)
 {
 	struct pwm_device *p = dev_get_drvdata(dev);
-	if (p->pwm_dev_capture == CAP_DISABLED) {
+	if (p->pwm_mode == PWM_GEN) {
 		return sprintf(buf, "%lu\n", pwm_get_period_ns(p));
 	}
 	return period_ns_show(p, buf);
@@ -610,7 +612,7 @@ static ssize_t pwm_period_ns_store(struct device *dev,
 	struct pwm_device *p = dev_get_drvdata(dev);
 	int ret;
 
-	if (p->pwm_dev_capture != CAP_DISABLED) {
+	if (p->pwm_mode == PWM_CAP) {
 		return -EOPNOTSUPP;
 	}
 
@@ -632,7 +634,7 @@ static ssize_t pwm_period_freq_show(struct device *dev,
 {
 	struct pwm_device *p = dev_get_drvdata(dev);
 	
-	if (p->pwm_dev_capture == CAP_DISABLED) {
+	if (p->pwm_mode == PWM_GEN) {
 		return sprintf(buf, "%lu\n", pwm_get_frequency(p));
 	}
 	return period_freq_show(p, buf);
@@ -648,7 +650,7 @@ static ssize_t pwm_period_freq_store(struct device *dev,
 
 	struct pwm_device *p = dev_get_drvdata(dev);
 
-	if (p->pwm_dev_capture != CAP_DISABLED) {
+	if (p->pwm_mode == PWM_CAP) {
 		return -EOPNOTSUPP;
 	}
 
@@ -669,7 +671,7 @@ static ssize_t pwm_polarity_show(struct device *dev,
 				 char *buf)
 {
 	struct pwm_device *p = dev_get_drvdata(dev);
-	if (p->pwm_dev_capture != CAP_DISABLED) {
+	if (p->pwm_mode == PWM_CAP) {
 		return -EOPNOTSUPP;
 	}
 	return sprintf(buf, "%d\n", p->active_high ? 1 : 0);
@@ -684,7 +686,7 @@ static ssize_t pwm_polarity_store(struct device *dev,
 	int ret;
 
 
-	if (p->pwm_dev_capture != CAP_DISABLED) {
+	if (p->pwm_mode == PWM_CAP) {
 		return -EOPNOTSUPP;
 	}
 
@@ -699,6 +701,36 @@ static ssize_t pwm_polarity_store(struct device *dev,
 }
 static DEVICE_ATTR(polarity, S_IRUGO | S_IWUSR, pwm_polarity_show,
 	       pwm_polarity_store);
+
+#define ECAP0 "ecap.0"
+#define ECAP1 "ecap.1"
+#define ECAP2 "ecap.2"
+
+static ssize_t set_pwm_mode(struct pwm_device *p, pwm_mode_t mode){
+	int ret;
+	if (!strcmp(ECAP0, dev_name(p->dev)) ||
+		!strcmp(ECAP1, dev_name(p->dev)) ||
+		!strcmp(ECAP2, dev_name(p->dev))) {
+		drop_registers(p);
+		if (mode == PWM_CAP) {
+			ret = p->ops->init_ecap_cap(p);
+			if (ret) {
+				return -EINVAL;
+			}
+			p->pwm_mode = PWM_CAP;
+		} else {
+			ret = p->ops->init_ecap_gen(p);
+			if (ret) {
+				return -EINVAL;
+			}
+			p->pwm_mode = PWM_GEN;
+		}
+	} else {
+		return -EOPNOTSUPP;
+	}
+
+	return 0;
+}
 
 static ssize_t pwm_request_show(struct device *dev,
 				struct device_attribute *attr,
@@ -717,10 +749,6 @@ static ssize_t pwm_request_show(struct device *dev,
 				dev_name(p->dev));
 }
 
-#define ECAP0 "ecap.0"
-#define ECAP1 "ecap.1"
-#define ECAP2 "ecap.2"
-
 static ssize_t pwm_request_store(struct device *dev,
 				 struct device_attribute *attr,
 				 const char *buf, size_t len)
@@ -728,7 +756,6 @@ static ssize_t pwm_request_store(struct device *dev,
 	struct pwm_device *p = dev_get_drvdata(dev);
 	unsigned long request;
 	struct pwm_device *ret;
-	int common_ret = 0;
 
 	if (!kstrtoul(buf, 10, &request)) {
 		if (request) {
@@ -746,46 +773,39 @@ static ssize_t pwm_request_store(struct device *dev,
 static DEVICE_ATTR(request, S_IRUGO | S_IWUSR, pwm_request_show,
 	       pwm_request_store);
 
-static ssize_t pwm_capture_show(struct device *dev,
+static ssize_t pwm_mode_show(struct device *dev,
 				struct device_attribute *attr,
 				char *buf)
 {
 	struct pwm_device *p = dev_get_drvdata(dev);
-	return sprintf(buf, "%d\n", p->pwm_dev_capture);
+	return sprintf(buf, "%d\n", p->pwm_mode);
 }
 
-static ssize_t pwm_capture_store(struct device *dev,
+static ssize_t pwm_mode_store(struct device *dev,
 				   struct device_attribute *attr,
 				   const char *buf, size_t len)
 {
-	int capture;
+	int mode;
 	int ret;
 	struct pwm_device *p = dev_get_drvdata(dev);
 
-	if (!kstrtoint(buf, 10, &capture)) {
-		drop_registers(p);
-		if (capture) {
-			if (!strcmp(ECAP0, dev_name(p->dev)) || 
-				!strcmp(ECAP1, dev_name(p->dev)) || 
-				!strcmp(ECAP2, dev_name(p->dev))) {
-				ret = ecap_cap_config(p);
-			} else {
-				return -EOPNOTSUPP;
-			}
-			if (ret) {
-				return -EINVAL;
-			}
-			p->pwm_dev_capture = CAP_ENABLED;
-		} else {
-			p->pwm_dev_capture = CAP_DISABLED;
+	if (!kstrtoint(buf, 10, &mode)) {
+		pwm_mode_t pwm_mode = PWM_GEN;
+		if (mode) {
+			pwm_mode = PWM_CAP;
 		}
+		ret = set_pwm_mode(p, pwm_mode);
+		if (ret) {
+			return -EINVAL;
+		}
+
 	}
 
 	return len;
 }
 
-static DEVICE_ATTR(capture, S_IRUGO | S_IWUSR, pwm_capture_show,
-	       pwm_capture_store);
+static DEVICE_ATTR(pwm_mode, S_IRUGO | S_IWUSR, pwm_mode_show,
+	       pwm_mode_store);
 
 static const struct attribute *pwm_attrs[] = {
 	&dev_attr_tick_hz.attr,
@@ -796,7 +816,7 @@ static const struct attribute *pwm_attrs[] = {
 	&dev_attr_request.attr,
 	&dev_attr_duty_percent.attr,
 	&dev_attr_period_freq.attr,
-	&dev_attr_capture.attr,
+	&dev_attr_pwm_mode.attr,
 	NULL,
 };
 

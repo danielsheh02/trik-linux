@@ -12,19 +12,22 @@
  * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  */
-#include <linux/init.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
-#include <linux/platform_device.h>
 #include <linux/err.h>
 #include <linux/io.h>
-#include <linux/device.h>
 #include <linux/interrupt.h>
-#include <linux/slab.h>
 #include <linux/clk.h>
 #include <linux/completion.h>
-#include <linux/kdev_t.h>
-#include <linux/pwm/ecap_cap.h>
+#include <linux/pwm/pwm.h>
+
+#define EC_RISING				0x0
+#define EC_RISING_FALLING			0x1
+
+#define EC_ABS_MODE				0x0
+#define EC_DELTA_MODE				0x1
+
+#define EC_ONESHOT				0x1
 
 /* eCAP register offsets */
 #define ECEINT					0x2C
@@ -177,7 +180,7 @@ static inline void ecap_rearm(void __iomem *base)
 /**
  * Initializes and configures the ecap module
  */
-int ecap_cap_config(struct pwm_device *p)
+int init_ecap_cap(struct pwm_device *p)
 {
 	struct ecap_pwm *ecap = to_ecap_pwm(p);
 	struct ecap_cap ecap_cap = ecap->ecap_cap;
@@ -216,6 +219,7 @@ int ecap_cap_config(struct pwm_device *p)
 	mutex_unlock(&ecap_mutex);
 	return 0;
 }
+EXPORT_SYMBOL(init_ecap_cap);
 
 irqreturn_t ecap_davinci_isr(int this_irq, void *dev_id)
 {
@@ -230,6 +234,7 @@ irqreturn_t ecap_davinci_isr(int this_irq, void *dev_id)
 	ecap_write_short(ecap->mmio_base, ECCLR, INT_FLAG_CLR);
 	return IRQ_HANDLED;
 }
+EXPORT_SYMBOL(ecap_davinci_isr);
 
 static int get_cap_value(struct ecap_pwm *ecap, short polarity)
 {
@@ -271,6 +276,7 @@ ssize_t prescale_show(struct pwm_device *p, char *buf)
   return sprintf(buf, "%d\n",
 			ecap->ecap_cap.prescale);
 }
+EXPORT_SYMBOL(prescale_show);
 
 ssize_t prescale_store(struct pwm_device *p, const char *buf, size_t len)
 {
@@ -284,6 +290,7 @@ ssize_t prescale_store(struct pwm_device *p, const char *buf, size_t len)
 
 	return len;
 }
+EXPORT_SYMBOL(prescale_store);
 
 ssize_t period_freq_show(struct pwm_device *p, char *buf)
 {
@@ -314,6 +321,8 @@ ssize_t period_freq_show(struct pwm_device *p, char *buf)
 
 	return sprintf(buf, "%d,%d,%d\n", freq1, freq2, freq3);
 }
+EXPORT_SYMBOL(period_freq_show);
+
 unsigned long ticks_to_ns(unsigned long ticks, unsigned long sys_freq)
 {
 	unsigned long long ns;
@@ -350,7 +359,10 @@ ssize_t period_ns_show(struct pwm_device *p, char *buf)
 							ticks_to_ns((ecap_val[3] - ecap_val[2])/prescale_val, p->tick_hz));
 
 }
-ssize_t duty_ns_show(struct pwm_device *p, char *buf){
+EXPORT_SYMBOL(period_ns_show);
+
+ssize_t duty_ns_show(struct pwm_device *p, char *buf)
+{
 		int ret;
 	unsigned long diff1, diff2;
 
@@ -377,6 +389,8 @@ ssize_t duty_ns_show(struct pwm_device *p, char *buf){
 
 	return sprintf(buf, "%lu\n", ticks_to_ns(diff1, p->tick_hz));
 }
+EXPORT_SYMBOL(duty_ns_show);
+
 ssize_t duty_percent_show(struct pwm_device *p, char *buf)
 {
 	int ret;
@@ -403,6 +417,7 @@ ssize_t duty_percent_show(struct pwm_device *p, char *buf)
 	diff2 = ecap_val[2] - ecap_val[0];
 	return sprintf(buf, "%d\n", (diff1 * 100)/diff2);
 }
+EXPORT_SYMBOL(duty_percent_show);
 
 MODULE_AUTHOR("Texas Instruments");
 MODULE_DESCRIPTION("Driver for Davinci eCAP peripheral");

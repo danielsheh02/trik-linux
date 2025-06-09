@@ -47,10 +47,10 @@ enum {
 	PWM_CONFIG_PERIOD_NS	= 8,
 };
 
-enum pwm_capture {
-	CAP_DISABLED = 0,
-	CAP_ENABLED = 1,
-};
+typedef enum {
+	PWM_GEN = 0,
+	PWM_CAP = 1,
+} pwm_mode_t;
 
 struct pwm_config;
 struct pwm_device;
@@ -72,6 +72,8 @@ struct pwm_device_ops {
 	int	(*set_callback)		(struct pwm_device *p,
 					 pwm_callback_t callback);
 	int	(*freq_transition_notifier_cb) (struct pwm_device *p);
+	int	(*init_ecap_gen) (struct pwm_device *p);
+	int	(*init_ecap_cap) (struct pwm_device *p);
 };
 
 struct pwm_config {
@@ -116,7 +118,7 @@ struct pwm_device {
 	struct notifier_block freq_transition;
 	spinlock_t pwm_lock;
 
-	enum pwm_capture pwm_dev_capture;
+	pwm_mode_t pwm_mode;
 };
 
 struct ecap_cap {

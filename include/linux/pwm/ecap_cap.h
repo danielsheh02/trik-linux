@@ -12,18 +12,12 @@
 #ifndef __LINUX_CAPTURE_H
 #define __LINUX_CAPTURE_H
 
-#define EC_RISING				0x0
-#define EC_RISING_FALLING			0x1
-
-#define EC_ABS_MODE				0x0
-#define EC_DELTA_MODE				0x1
-
-#define EC_ONESHOT				0x1
 #include <linux/irqreturn.h>
 #include <linux/pwm/pwm.h>
 
 int ecap_cap_config(struct pwm_device *p);
 irqreturn_t ecap_davinci_isr(int this_irq, void *dev_id);
+int init_ecap_cap(struct pwm_device *p);
 
 ssize_t duty_ns_show(struct pwm_device *p, char *buf);
 ssize_t duty_percent_show(struct pwm_device *p, char *buf);

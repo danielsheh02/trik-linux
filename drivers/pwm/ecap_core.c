@@ -18,146 +18,14 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
-#include <linux/pwm/ecap_cap.h>
 #include <linux/slab.h>
 #include <linux/interrupt.h>
-
-#define TIMER_CTR_REG 0x0
-#define CAPTURE_2_REG 0x0c
-#define CAPTURE_3_REG 0x10
-#define CAPTURE_4_REG 0x14
-#define CAPTURE_CTRL2_REG 0x2A
-
-#define ECTRL2_SYNCOSEL_MASK (0x03 << 6)
-
-#define ECTRL2_MDSL_ECAP BIT(9)
-#define ECTRL2_CTRSTP_FREERUN BIT(4)
-#define ECTRL2_PLSL_LOW BIT(10)
-#define ECTRL2_SYNC_EN BIT(5)
+#include <linux/pwm/pwm.h>
+#include <linux/pwm/ecap_cap.h>
+#include <linux/pwm/ecap_gen.h>
 
 #define CLK_DISABLE 0
 #define CLK_ENABLE 1
-
-static int ecap_pwm_stop(struct pwm_device *p) {
-	unsigned long flags;
-	struct ecap_pwm *ep = to_ecap_pwm(p);
-
-	if (ep->clk_enabled == CLK_DISABLE)
-		return 0;
-
-	spin_lock_irqsave(&ep->lock, flags);
-	__raw_writew(__raw_readw(ep->mmio_base + CAPTURE_CTRL2_REG) & ~BIT(4),
-							 ep->mmio_base + CAPTURE_CTRL2_REG);
-	spin_unlock_irqrestore(&ep->lock, flags);
-
-	ep->clk_enabled = CLK_DISABLE;
-	clk_disable(ep->clk);
-	clear_bit(FLAG_RUNNING, &p->flags);
-
-	return 0;
-}
-
-static int ecap_pwm_start(struct pwm_device *p) {
-	int ret = 0;
-	unsigned long flags;
-	struct ecap_pwm *ep = to_ecap_pwm(p);
-
-	if (ep->clk_enabled == CLK_ENABLE)
-		return 0;
-
-	clk_enable(ep->clk);
-	ep->clk_enabled = CLK_ENABLE;
-	spin_lock_irqsave(&ep->lock, flags);
-	__raw_writew(__raw_readw(ep->mmio_base + CAPTURE_CTRL2_REG) | BIT(4),
-							 ep->mmio_base + CAPTURE_CTRL2_REG);
-	spin_unlock_irqrestore(&ep->lock, flags);
-	set_bit(FLAG_RUNNING, &p->flags);
-
-	return ret;
-}
-
-static int ecap_pwm_set_polarity(struct pwm_device *p, char pol) {
-	unsigned long flags;
-	struct ecap_pwm *ep = to_ecap_pwm(p);
-
-	clk_enable(ep->clk);
-
-	spin_lock_irqsave(&ep->lock, flags);
-	__raw_writew((__raw_readw(ep->mmio_base + CAPTURE_CTRL2_REG) & ~BIT(10)) |
-									 (!pol << 10),
-							 ep->mmio_base + CAPTURE_CTRL2_REG);
-	spin_unlock_irqrestore(&ep->lock, flags);
-
-	clk_disable(ep->clk);
-	return 0;
-}
-
-static int ecap_pwm_config_period(struct pwm_device *p) {
-	unsigned long flags;
-	struct ecap_pwm *ep = to_ecap_pwm(p);
-
-	clk_enable(ep->clk);
-
-	spin_lock_irqsave(&ep->lock, flags);
-	__raw_writel((p->period_ticks) - 1, ep->mmio_base + CAPTURE_3_REG);
-	__raw_writew(ECTRL2_MDSL_ECAP | ECTRL2_SYNCOSEL_MASK | ECTRL2_CTRSTP_FREERUN,
-							 ep->mmio_base + CAPTURE_CTRL2_REG);
-	spin_unlock_irqrestore(&ep->lock, flags);
-
-	clk_disable(ep->clk);
-	return 0;
-}
-
-static int ecap_pwm_config_duty(struct pwm_device *p) {
-	unsigned long flags;
-	struct ecap_pwm *ep = to_ecap_pwm(p);
-
-	clk_enable(ep->clk);
-
-	spin_lock_irqsave(&ep->lock, flags);
-	__raw_writew(ECTRL2_MDSL_ECAP | ECTRL2_SYNCOSEL_MASK | ECTRL2_CTRSTP_FREERUN,
-							 ep->mmio_base + CAPTURE_CTRL2_REG);
-	if (p->duty_ticks > 0) {
-		__raw_writel(p->duty_ticks, ep->mmio_base + CAPTURE_4_REG);
-	} else {
-		__raw_writel(p->duty_ticks, ep->mmio_base + CAPTURE_2_REG);
-		__raw_writel(0, ep->mmio_base + TIMER_CTR_REG);
-	}
-	spin_unlock_irqrestore(&ep->lock, flags);
-
-	clk_disable(ep->clk);
-	return 0;
-}
-
-static int ecap_pwm_config(struct pwm_device *p, struct pwm_config *c) {
-	int ret = 0;
-	switch (c->config_mask) {
-
-	case BIT(PWM_CONFIG_DUTY_TICKS):
-		p->duty_ticks = c->duty_ticks;
-		ret = ecap_pwm_config_duty(p);
-		break;
-
-	case BIT(PWM_CONFIG_PERIOD_TICKS):
-		p->period_ticks = c->period_ticks;
-		ret = ecap_pwm_config_period(p);
-		break;
-
-	case BIT(PWM_CONFIG_POLARITY):
-		ret = ecap_pwm_set_polarity(p, c->polarity);
-		break;
-
-	case BIT(PWM_CONFIG_START):
-		ret = ecap_pwm_start(p);
-		break;
-
-	case BIT(PWM_CONFIG_STOP):
-		ret = ecap_pwm_stop(p);
-		break;
-	}
-
-	return ret;
-}
 
 static int ecap_pwm_request(struct pwm_device *p) {
 	struct ecap_pwm *ep = to_ecap_pwm(p);
@@ -234,8 +102,10 @@ static int __devinit ecap_probe(struct platform_device *pdev) {
 	}
 
 	spin_lock_init(&ep->lock);
-	ep->ops.config = ecap_pwm_config;
+	ep->ops.config = ecap_gen_config;
 	ep->ops.request = ecap_pwm_request;
+	ep->ops.init_ecap_gen = init_ecap_gen;
+	ep->ops.init_ecap_cap = init_ecap_cap;
 	ep->ops.freq_transition_notifier_cb = ecap_frequency_transition_cb;
 	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!r) {
